@@ -45,11 +45,8 @@ train_config = {
     "grad_clip": 0.5,
     "save_freq": 2
 }
-import json
-from safetensors import safe_open
-# from transformers import AutoModelForCausalLM, AutoTokenizer,AutoModelForSequenceClassification
+
 import os
-# os.environ["CUDA_VISIBLE_DEVICES"] = "0,1"
 import torch
 
 torch.backends.cuda.matmul.allow_tf32 = True
@@ -69,11 +66,9 @@ from model.cnets import Model
 from model.configs import EConfig
 from typing import Any, Dict, List
 
-from torch import nn, optim
+from torch import nn
 from torch.utils.data import Dataset, DataLoader
 from tqdm import tqdm
-# import accelerate
-import numpy as np
 from transformers import get_linear_schedule_with_warmup, AutoConfig
 from model.utils import create_adamw_optimizer
 
