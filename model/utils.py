@@ -24,7 +24,7 @@ def create_adamw_optimizer(
     lr: float = 0.001,
     weight_decay: float = 1e-2,
     betas=(0.9, 0.999),
-    no_decay_keywords: Sequence[str] = ('bias', 'LayerNorm', 'layernorm'),
+    no_decay_keywords: Sequence[str] = [],
     dummy=False
 ):
     # default paramaters is same as admaw
