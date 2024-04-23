@@ -3,13 +3,11 @@ import random
 
 
 # typing 
-from typing import List, Tuple
+from typing import List, Tuple, Sequence
 import time
 import torch
 
-# TODO
-# from transformers import LlamaTokenizer
-# tokenizer=LlamaTokenizer.from_pretrained("/home/lyh/weights/hf/vicuna_v13/7B/")
+from accelerate.utils import DummyOptim
 
 TOPK = 10  # topk for sparse tree
 
@@ -20,6 +18,35 @@ from transformers.generation.logits_process import (
     TopKLogitsWarper,
     TopPLogitsWarper,
 )
+
+def create_adamw_optimizer(
+    model: torch.nn.Module,
+    lr: float = 0.001,
+    weight_decay: float = 1e-2,
+    betas=(0.9, 0.999),
+    no_decay_keywords: Sequence[str] = ('bias', 'LayerNorm', 'layernorm'),
+    dummy=False
+):
+    # default paramaters is same as admaw
+    parameters = list(model.named_parameters())
+    optimizer_grouped_parameters = [
+        {
+            'params': [p for n, p in parameters if not any(nd in n for nd in no_decay_keywords)],
+            'weight_decay': weight_decay,
+            'lr': lr
+        },
+        {
+            'params': [p for n, p in parameters if any(nd in n for nd in no_decay_keywords)],
+            'weight_decay': 0.0,
+            'lr': lr
+        },
+    ]
+    if not dummy:
+        optimizer = torch.optim.AdamW(optimizer_grouped_parameters, lr=lr,betas=betas,weight_decay=weight_decay)
+    else:
+        # 使用deepspeed时需要使用dummy
+        optimizer = DummyOptim(optimizer_grouped_parameters,lr=lr,weight_decay=weight_decay,betas=betas)
+    return optimizer
 
 def timer(func):
     def wrapper(*args, **kwargs):
