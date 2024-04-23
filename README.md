@@ -33,7 +33,8 @@ EAGLE (Extrapolation Algorithm for Greater Language-model Efficiency) is a new b
 **The sequence of LLM feature vectors is compressible over time, making the prediction of subsequent feature vectors from previous ones easy.**
 
 - EAGLE is:
-	- achieving **2x** speedup on gpt-fast, one of the **fastest**-known open-sourced inferences.
+	- certified by the <a href="https://github.com/hemingkx/Spec-Bench/blob/main/Leaderboard.md"><b>third-party</b></a> evaluation as the **fastest** speculative method so far. 
+	- achieving **2x** speedup on <a href="https://github.com/pytorch-labs/gpt-fast"><b>gpt-fast</b></a>.
 	- **3x** faster than vanilla decoding (13B).
  	- **2x** faster than <a href="https://lmsys.org/blog/2023-11-21-lookahead-decoding/"><b>Lookahead</b></a> (13B).
  	- **1.6x** faster than <a href="https://sites.google.com/view/medusa-llm"><b>Medusa</b></a> (13B).
@@ -48,13 +49,17 @@ EAGLE (Extrapolation Algorithm for Greater Language-model Efficiency) is a new b
 _Inference is conducted on RTX 3090 GPUs at fp16 precision using the Vicuna 33B model. For an enhanced viewing experience, the animation has been sped up fourfold._
 
 ## Update
-**2023.12.8**: EAGLE v1.0 is released.
+**2024.2.25**: EAGLE is certified by the <a href="https://github.com/hemingkx/Spec-Bench/blob/main/Leaderboard.md">third-party</a> evaluation as the fastest speculative method.
 
-**2024.1.15**: We now support [batch size > 1](#batch-size--1) generation.
+**2024.1.17**: We now support [Mixtral-8x7B-Instruct](https://huggingface.co/mistralai/Mixtral-8x7B-Instruct-v0.1).
 
 **2024.1.17**: We have integrated [gpt-fast](https://github.com/pytorch-labs/gpt-fast) into EAGLE, [further accelerating](https://github.com/SafeAILab/EAGLE/tree/eaglefast) the generation speed.
 
-**2024.1.17**: We now support  [Mixtral-8x7B-Instruct](https://huggingface.co/mistralai/Mixtral-8x7B-Instruct-v0.1).
+**2024.1.15**: We now support [batch size > 1](#batch-size--1) generation.
+
+**2023.12.8**: EAGLE v1.0 is released.
+
+
 
 ## Todo
 - [x] Support non-greedy inference (provably maintaining text distribution).
@@ -75,6 +80,7 @@ _Inference is conducted on RTX 3090 GPUs at fp16 precision using the Vicuna 33B 
 - [Train](#train)
   - [Generate Train Data](#generate-train-data)
   - [Train the Auto-regression Head](#train-the-auto-regression-head)
+  - [Inference on custom models](#inference-on-custom-models)
 - [Evaluation](#evaluation)
 - [With gpt-fast](#with-gpt-fast)
   - [Setup](#setup)
@@ -208,6 +214,42 @@ cd train
 accelerate launch --mixed_precision=bf16 main.py --tmpdir [path of data]\
 --cpdir [path of checkpoints]
 ```
+
+### Inference on custom models
+
+If the original LLM structure differs from LLaMA and Mixtral, you can utilize EAGLE in two ways.
+
+#### 1. Using the generic modeling_eagle.py
+
+This approach directly encapsulates the native Transformers LLM. Here is an example. **Note: transformers version should be higher than 4.36.**
+
+```python
+from modeling_eagle import EAGLE
+from transformers import AutoModelForCausalLM,AutoTokenizer
+
+tokenizer=AutoTokenizer.from_pretrained(base_model_path)
+model=AutoModelForCausalLM.from_pretrained("base_model_path",torch_dtype=torch.float16,device_map="auto",)
+# for bs>1, the padding side should be right
+if bs>1:
+    tokenizer.padding_side = "left"
+    tokenizer.pad_token = tokenizer.eos_token
+    model.config.pad_token_id = model.config.eos_token_id
+
+text=prompt1
+# text=[prompt1,prompt2]
+inputs = tokenizer(text, return_tensors="pt",padding=True)
+
+eagle=EAGLE(model,eagle_path)
+outs=eagle.generate(**inputs, max_new_tokens=200,temperature=0.0)
+output=tokenizer.decode(outs)
+# output=tokenizer.batch_decode(outs)
+```
+
+#### 2. Modifying the code of the model
+
+Copy the modeling_basemodelname.py from the Transformers library and proceed to make modifications to leverage the pre-allocated kv_cache for enhanced speed in the base model. You can refer to model/modeling_llama_kv.py for guidance, where places that require modifications are annotated with # [MODIFIED]. These modifications are minimal.
+
+
 ## Evaluation
 You can test the speed of EAGLE on MT-bench using the following command.
 ```bash
