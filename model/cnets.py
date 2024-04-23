@@ -759,7 +759,7 @@ class Model(nn.Module):
         #     return sampled_indices, sampled_probs
 
     @torch.no_grad()
-    def topK_genrate(self, hidden_states, input_ids, head, logits_processor,max_length=4, use_cache=True):
+    def topK_generate(self, hidden_states, input_ids, head, logits_processor,max_length=4, use_cache=True):
         # test_=input_ids
         # input_ids = torch.tensor([state[1:]])
         input_ids = input_ids[:, 1:]

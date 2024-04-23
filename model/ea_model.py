@@ -17,7 +17,7 @@ from .cnets import Model
 from .configs import EConfig
 from huggingface_hub import hf_hub_download
 
-
+from safetensors import safe_open
 
 
 class EaModel(nn.Module):
@@ -27,6 +27,7 @@ class EaModel(nn.Module):
             base_model,
             base_model_name_or_path,
             ea_model_path,
+            **kwargs
     ):
 
         super().__init__()
@@ -37,13 +38,8 @@ class EaModel(nn.Module):
         self.base_model_name_or_path = base_model_name_or_path
         self.tokenizer = AutoTokenizer.from_pretrained(self.base_model_name_or_path)
         config = EConfig.from_pretrained(ea_model_path)
-        with open(ea_model_path,"r") as f:
-            con=json.loads(f.read())
-        try:
-            bias=con["bias"]
-        except:
-            bias=True
-        self.ea_layer = Model(config,bias=bias)
+
+        self.ea_layer = Model(config,path=base_model_name_or_path)
 
         low_memory=False
 
@@ -96,14 +92,12 @@ class EaModel(nn.Module):
         model = cls(
             base_model,
             base_model_path,
-            configpath
+            configpath,
+            **kwargs
         )
-        load_model_path=os.path.join(ea_model_path, "pytorch_model.bin")
-        if not os.path.exists(load_model_path):
-            load_model_path=hf_hub_download(ea_model_path, "pytorch_model.bin")
-        ea_layer_state_dict = torch.load(load_model_path,
-                                         map_location=base_model.device)
-        model.ea_layer.load_state_dict(ea_layer_state_dict, strict=True)
+        load_model_path=os.path.join(ea_model_path, "ckpt.pt")
+        ckpt = torch.load(load_model_path)
+        model.ea_layer.load_state_dict(ckpt["model_state"], strict=False)
 
         return model
 
@@ -142,7 +136,7 @@ class EaModel(nn.Module):
             input_ids = torch.cat((input_ids, token.to(input_ids.device)), dim=1)
             # Clone the output hidden states
 
-            ea_logits = self.ea_layer.topK_genrate(hidden_states, input_ids, self.base_model.lm_head, logits_processor)
+            ea_logits = self.ea_layer.topK_generate(hidden_states, input_ids, self.base_model.lm_head, logits_processor)
             if output_orig:
                 return ea_logits, outputs, orig, hidden_states, token
             return ea_logits, hidden_states, token

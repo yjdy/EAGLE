@@ -60,6 +60,7 @@ def ea_forward(input_ids, model, tokenizer, tree_choices, logits_processor=None,
         input_ids, model, tree_buffers["tree_attn_mask"], past_key_values, logits_processor
     )
     new_token = 0
+    total_accept_length = 0
 
     for idx in range(max_steps):
         candidates, cart_candidates_prob, tree_candidates = generate_candidates(
@@ -81,6 +82,7 @@ def ea_forward(input_ids, model, tokenizer, tree_choices, logits_processor=None,
             logits, candidates, logits_processor, cart_candidates_prob, tree_logits[2], tree_buffers["p_indices"],
             tree_candidates, tree_buffers["b_indices"]
         )
+        total_accept_length += int(accept_length)
         input_ids, tree_logits, new_token, hidden_state, sample_token = update_inference_inputs(
             input_ids,
             candidates,
@@ -104,7 +106,7 @@ def ea_forward(input_ids, model, tokenizer, tree_choices, logits_processor=None,
             break
         if input_ids.shape[1] > 1960:
             break
-    return input_ids, new_token, idx
+    return input_ids, new_token, idx, total_accept_length
 
 
 def run_eval(
@@ -185,6 +187,7 @@ def get_model_answers(
         ea_model_path=ea_model_path,
         torch_dtype=torch.float16,
         low_cpu_mem_usage=True,
+        trust_remote_code=True,
         # load_in_8bit=True,
         device_map="auto"
     )
@@ -224,7 +227,7 @@ def get_model_answers(
             torch.cuda.synchronize()
             start_time = time.time()
 
-            output_ids, new_token, idx = ea_forward(
+            output_ids, new_token, idx,_ = ea_forward(
                 torch.as_tensor(input_ids).cuda(),
                 model,
                 tokenizer,
@@ -270,6 +273,8 @@ def get_model_answers(
     print('Warmup done')
 
     # questions=questions[6:]
+    total_generate_token_length = 0
+    total_steps = 0
     for question in tqdm(questions):
 
         choices = []
@@ -290,7 +295,7 @@ def get_model_answers(
                 try:
                     torch.cuda.synchronize()
                     start_time = time.time()
-                    output_ids, new_token, idx = ea_forward(
+                    output_ids, new_token, idx, total_accept_length = ea_forward(
                         torch.as_tensor(input_ids).cuda(),
                         model,
                         tokenizer,
@@ -300,6 +305,8 @@ def get_model_answers(
                     torch.cuda.synchronize()
                     total_time = time.time() - start_time
                     output_ids = output_ids[0][len(input_ids[0]):]
+                    total_steps += idx+1
+                    total_generate_token_length += total_accept_length
 
                     if conv.stop_token_ids:
                         stop_token_ids_index = [
@@ -349,6 +356,7 @@ def get_model_answers(
                 "tstamp": time.time(),
             }
             fout.write(json.dumps(ans_json) + "\n")
+    print(f"Tokens per step: {total_generate_token_length/total_steps}")
 
 
 def reorg_answer_file(answer_file):
