@@ -286,7 +286,7 @@ with accelerator.main_process_first():
     # testdataset = CustomDataset(testdatapath)
     train_loader = DataLoader(traindataset, batch_size=train_config["bs"], shuffle=True, drop_last=True,
                               collate_fn=DataCollatorWithPadding(), num_workers=train_config["num_workers"],
-                              pin_memory=True)
+                              pin_memory=False) # 因为每个数据都是从硬盘load，pin_memory会导致内存一直不释放
     # test_loader = DataLoader(testdataset, batch_size=train_config["bs"], shuffle=False,
     #                          collate_fn=DataCollatorWithPadding(), num_workers=train_config["num_workers"],
     #                          pin_memory=False)
@@ -363,13 +363,14 @@ for epoch in range(num_epochs + 1):
                 target_p = nn.Softmax(dim=2)(target_head)
                 target_p = target_p.detach()
             out_head = model.head(predict)
-            out_logp = nn.LogSoftmax(dim=2)(out_head)
-            loss_mask = data["loss_mask"][:, :, None]
-            plogp = target_p * out_logp
-            ploss = -torch.sum(torch.sum(loss_mask * plogp, 2)) / loss_mask.sum()
-            vloss = criterion(predict, data["target"])
-            vloss = torch.sum(torch.mean(loss_mask * vloss, 2)) / loss_mask.sum()
-            loss = train_config["v_w"] * vloss + train_config["p_w"] * ploss
+            with accelerator.autocast():
+                out_logp = nn.LogSoftmax(dim=2)(out_head)
+                loss_mask = data["loss_mask"][:, :, None]
+                plogp = target_p * out_logp
+                ploss = -torch.sum(torch.sum(loss_mask * plogp, 2)) / loss_mask.sum()
+                vloss = criterion(predict, data["target"])
+                vloss = torch.sum(torch.mean(loss_mask * vloss, 2)) / loss_mask.sum()
+                loss = train_config["v_w"] * vloss + train_config["p_w"] * ploss
             accelerator.backward(loss)
             if accelerator.sync_gradients:
                 accelerator.clip_grad_norm_(model.parameters(), train_config["grad_clip"])
@@ -396,5 +397,5 @@ for epoch in range(num_epochs + 1):
     epoch_loss /= num_batches
     accelerator.print('Epoch [{}/{}], Loss: {:.4f}'.format(epoch + 1, num_epochs, epoch_loss))
     accelerator.print('Train Accuracy: {:.2f}%'.format(100 * correct / total))
-
+    accelerator.wait_for_everyone() #确保所有训练都完成
     accelerator.save_state(output_dir=f"{args.cpdir}/state_{epoch}")
