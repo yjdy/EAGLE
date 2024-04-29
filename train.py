@@ -61,7 +61,7 @@ accelerator = Accelerator(mixed_precision=args.precision,
                           log_with=None,
                           dispatch_batches=True,
                           split_batches=True,
-                          kwargs_handleers=[ddp_kwargs])
+                          kwargs_handlers=[ddp_kwargs])
 from model.cnets import Model
 from model.configs import EConfig
 from typing import Any, Dict, List
