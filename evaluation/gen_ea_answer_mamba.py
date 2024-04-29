@@ -195,11 +195,6 @@ def get_model_answers(
     tokenizer = model.get_tokenizer()
     logits_processor = prepare_logits_processor(**generate_args)
 
-    # if temperature > 1e-5:
-    #     logits_processor = prepare_logits_processor(temperature=temperature)
-    # else:
-    #     logits_processor = None
-
     model.eval()
     print('Check model training state:', model.training)
 
