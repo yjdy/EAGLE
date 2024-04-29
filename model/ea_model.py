@@ -36,7 +36,7 @@ class EaModel(nn.Module):
         self.hidden_size = base_model.lm_head.weight.shape[-1]
         self.vocab_size = base_model.lm_head.weight.shape[0]
         self.base_model_name_or_path = base_model_name_or_path
-        self.tokenizer = AutoTokenizer.from_pretrained(self.base_model_name_or_path)
+        self.tokenizer = AutoTokenizer.from_pretrained(self.base_model_name_or_path,**kwargs)
         config = EConfig.from_pretrained(ea_model_path)
 
         self.ea_layer = Model(config,path=base_model_name_or_path)
@@ -76,7 +76,7 @@ class EaModel(nn.Module):
             **kwargs,
     ):
         #assert Type=="LLaMA" or "Mixtral"
-        Type=AutoConfig.from_pretrained(base_model_path).architectures[0]
+        Type=AutoConfig.from_pretrained(base_model_path, **kwargs).architectures[0]
         if Type=='LlamaForCausalLM':
             base_model = KVLlamaForCausalLM.from_pretrained(
                 base_model_path, **kwargs
@@ -128,11 +128,11 @@ class EaModel(nn.Module):
             if logits_processor is not None:
                 logits = orig[:, -1]
                 logits = logits_processor(None, logits)
-                probabilities = torch.nn.functional.softmax(logits, dim=1)
+                probabilities = torch.nn.functional.softmax(logits, dim=-1)
                 token = torch.multinomial(probabilities, 1)
             else:
-                token = torch.argmax(orig[:, -1])
-                token = token[None, None]
+                token = torch.argmax(orig[:, -1],dim=-1)
+                token = token[:,None]
             input_ids = torch.cat((input_ids, token.to(input_ids.device)), dim=1)
             # Clone the output hidden states
 
