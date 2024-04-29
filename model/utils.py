@@ -3,7 +3,7 @@ import random
 
 
 # typing 
-from typing import List, Tuple, Sequence
+from typing import List, Tuple, Sequence,Union
 import time
 import torch
 
@@ -67,18 +67,18 @@ def prepare_logits_processor(
         repetition_penalty: float = 0.0, 
         top_p: float = 0.0, 
         top_k: int = 0
-) -> LogitsProcessorList:
+) -> Union[LogitsProcessorList,None]:
     processor_list = LogitsProcessorList()
-    if temperature>1e-5:
-        if temperature >= 1e-5 and temperature != 1.0:
-            processor_list.append(TemperatureLogitsWarper(temperature))
-        if repetition_penalty > 1.0:
-            processor_list.append(RepetitionPenaltyLogitsProcessor(repetition_penalty))
-        if 1e-8 <= top_p < 1.0:
-            processor_list.append(TopPLogitsWarper(top_p))
-        if top_k > 0:
-            processor_list.append(TopKLogitsWarper(top_k))
-        return processor_list
+
+    if temperature >= 1e-5 and temperature != 1.0:
+        processor_list.append(TemperatureLogitsWarper(temperature))
+    if repetition_penalty > 1.0:
+        processor_list.append(RepetitionPenaltyLogitsProcessor(repetition_penalty))
+    if 1e-8 <= top_p < 1.0:
+        processor_list.append(TopPLogitsWarper(top_p))
+    if top_k > 0:
+        processor_list.append(TopKLogitsWarper(top_k))
+    return processor_list if processor_list else None
 
 
 # test_processor = prepare_logits_processor(
@@ -361,7 +361,7 @@ def evaluate_posterior(
     if logits_processor is None:
         # Find the tokens that match the maximum logits for each position in the sequence
         posterior_mask = (
-                candidates[:, 1:].to(logits.device) == torch.argmax(logits[:, :-1], dim=-1)
+                candidates[:, 1:] == torch.argmax(logits[:, :-1], dim=-1)
         ).int()
         candidates_accept_length = (torch.cumprod(posterior_mask, dim=1)).sum(dim=1)
         accept_length = candidates_accept_length.max()

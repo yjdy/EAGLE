@@ -19,6 +19,8 @@ from model.kv_cache import initialize_past_key_values
 from model.utils import *
 from model.choices import *
 
+from typing import Dict
+
 
 def ea_forward(input_ids, model, tokenizer, tree_choices, logits_processor=None, max_steps=512):
     assert input_ids.shape[0] == 1, "Only support batch size 1 for now!!"
@@ -83,7 +85,7 @@ def ea_forward(input_ids, model, tokenizer, tree_choices, logits_processor=None,
             tree_candidates, tree_buffers["b_indices"]
         )
         total_accept_length += int(accept_length)
-        input_ids, tree_logits, new_token, hidden_state, sample_token = update_inference_inputs_mamba(
+        input_ids, tree_logits, new_token, hidden_state, sample_token = update_inference_inputs(
             input_ids,
             candidates,
             best_candidate,
@@ -120,7 +122,7 @@ def run_eval(
         num_gpus_per_model,
         num_gpus_total,
         max_gpu_memory,
-        temperature,
+        generate_args:Dict[str,float],
         tree_choices,
 ):
     questions = load_questions(question_file, question_begin, question_end)
@@ -155,7 +157,7 @@ def run_eval(
                 num_choices,
                 num_gpus_per_model,
                 max_gpu_memory,
-                temperature,
+                generate_args,
                 tree_choices,
             )
         )
@@ -175,7 +177,7 @@ def get_model_answers(
         num_choices,
         num_gpus_per_model,
         max_gpu_memory,
-        temperature,
+        generate_args: Dict[str, float],
         tree_choices,
 ):
     # temperature = 0.0
@@ -191,11 +193,12 @@ def get_model_answers(
     )
 
     tokenizer = model.get_tokenizer()
+    logits_processor = prepare_logits_processor(**generate_args)
 
-    if temperature > 1e-5:
-        logits_processor = prepare_logits_processor(temperature=temperature)
-    else:
-        logits_processor = None
+    # if temperature > 1e-5:
+    #     logits_processor = prepare_logits_processor(temperature=temperature)
+    # else:
+    #     logits_processor = None
 
     model.eval()
     print('Check model training state:', model.training)
@@ -436,6 +439,21 @@ if __name__ == "__main__":
         type=float,
         default=1.0,
     )
+    parser.add_argument(
+        "--repetition_penalty",
+        type=float,
+        default=0.0,
+    )
+    parser.add_argument(
+        "--top_p",
+        type=float,
+        default=0.0,
+    )
+    parser.add_argument(
+        "--top_k",
+        type=float,
+        default=0.0,
+    )
 
     parser.add_argument(
         "--tree-choices",
@@ -459,6 +477,7 @@ if __name__ == "__main__":
         answer_file = f"data/{args.bench_name}/model_answer/{args.model_id}.jsonl"
 
     print(f"Output to {answer_file}")
+    generate_args = {"temperature":args.temperature,"top_k":args.top_k,"top_p":args.top_p,"repetition_penalty":args.repetition_penalty}
 
     run_eval(
         args.base_model_path,
@@ -473,8 +492,7 @@ if __name__ == "__main__":
         args.num_gpus_per_model,
         args.num_gpus_total,
         args.max_gpu_memory,
-
-        args.temperature,
+        generate_args,
         args.tree_choices,
     )
 

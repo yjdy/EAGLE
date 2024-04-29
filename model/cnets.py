@@ -452,7 +452,7 @@ def len_list(x,n):
     return [i for i in x if len(i)<=n]
 
 class Model(nn.Module):
-    def __init__(self,config,load_emb=False,path=None,bias=True):
+    def __init__(self,config,load_emb=True,path=None,bias=True):
         super().__init__()
 
 
@@ -722,41 +722,6 @@ class Model(nn.Module):
         sampled_probs = torch.clamp(sampled_probs, min=0.0, max=1.0)
 
         return sampled_indices, sampled_probs,probabilities
-
-        # if replacement:
-        #     sampled_indices = torch.multinomial(probabilities, k, replacement=True)
-        #     sampled_probs = torch.gather(probabilities, 1, sampled_indices)
-        #     return sampled_indices, sampled_probs
-        # else:
-        #     sampled_indices = torch.multinomial(probabilities, k, replacement=False)
-        #     sampled_probs = torch.gather(probabilities, 1, sampled_indices)
-        #
-        #     cumulative_sum = torch.cumsum(sampled_probs, dim=1)
-        #     cumulative_sum = torch.cat((torch.zeros(cumulative_sum.shape[0],1, device=cumulative_sum.device), cumulative_sum[:, :-1]),dim=-1)
-        #
-        #     sampled_probs=sampled_probs/(1-cumulative_sum)
-        #     sampled_probs[torch.isinf(sampled_probs)] = -1
-        #     sampled_probs[torch.isnan(sampled_probs)] = -1
-        #
-        #     sampled_probs = torch.clamp(sampled_probs, min=0.0, max=1.0)
-        #
-        #     # has_nan = torch.isnan(sampled_probs).any()
-        #     # if has_nan:
-        #     #     print(1)
-        #
-        #     # sampled_probs_list=sampled_probs[0].tolist()
-        #     # sum_list=[1-sum(sampled_probs_list[:i]) for i in range(len(sampled_probs_list))]
-        #     # for i in range(len(sampled_probs_list)):
-        #     #     a=sampled_probs_list[i]/(sum_list[i])
-        #     #     if sum_list[i]==0:
-        #     #         sampled_probs_list[i]=1.0
-        #     #     else:
-        #     #         sampled_probs_list[i]=sampled_probs_list[i]/(sum_list[i])
-        #     # sampled_probs=torch.tensor([sampled_probs_list],device=sampled_probs.device)
-        #
-        #
-        #
-        #     return sampled_indices, sampled_probs
 
     @torch.no_grad()
     def topK_generate(self, hidden_states, input_ids, head, logits_processor,max_length=4, use_cache=True):
