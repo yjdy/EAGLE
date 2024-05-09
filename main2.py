@@ -371,9 +371,9 @@ for epoch in range(num_epochs + 1):
             out_logp = logsofmax(out_head)
             loss_mask = data["loss_mask"][:, :, None]
             plogp = target_p * out_logp
-            ploss = -torch.sum(torch.sum(loss_mask * plogp, 2)) / loss_mask.sum()
-            vloss = criterion(out_head, target_p)
-            vloss = torch.sum(torch.mean(loss_mask * vloss, 2)) / loss_mask.sum()
+            ploss = -torch.sum(torch.sum(loss_mask * plogp, 2)) / (loss_mask.sum()+1e-8)
+            vloss = criterion(softmax(out_head), target_p)
+            vloss = torch.sum(torch.mean(loss_mask * vloss, 2)) / (loss_mask.sum()+1e-8)
             loss = train_config["v_w"] * vloss + train_config["p_w"] * ploss
             accelerator.backward(loss)
             if accelerator.sync_gradients:
@@ -429,9 +429,9 @@ for epoch in range(num_epochs + 1):
                 out_logp = logsofmax(out_head)
                 loss_mask = data["loss_mask"][:, :, None]
                 plogp = target_p * out_logp
-                ploss = -torch.sum(torch.sum(loss_mask * plogp, 2)) / loss_mask.sum()
-                vloss = criterion(out_head, target_p)
-                vloss = torch.sum(torch.mean(loss_mask * vloss, 2)) / loss_mask.sum()
+                ploss = -torch.sum(torch.sum(loss_mask * plogp, 2)) / (loss_mask.sum()+1e-8)
+                vloss = criterion(softmax(out_head), target_p)
+                vloss = torch.sum(torch.mean(loss_mask * vloss, 2)) / (loss_mask.sum()+1e-8)
                 loss = train_config["v_w"] * vloss + train_config["p_w"] * ploss
                 _, predicted = torch.max(out_head, 2)
                 _, target = torch.max(target_head, 2)
