@@ -76,13 +76,15 @@ from model.utils import create_adamw_optimizer
 
 baseconfig = AutoConfig.from_pretrained(args.basepath)
 
-
-def list_files(path):
+import random
+def list_files(path,shuffle=True):
     datapath = []
     for root, directories, files in os.walk(path):
         for file in files:
             file_path = os.path.join(root, file)
             datapath.append(file_path)
+    if shuffle:
+        random.shuffle(datapath)
     return datapath
 
 
