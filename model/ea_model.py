@@ -46,13 +46,13 @@ class EaModel(nn.Module):
         device = base_model.model.layers[-1].self_attn.q_proj.weight.device
         if device!=base_model.lm_head.weight.device:
             self.ea_layer.diff_device = True
-            if not low_memory:
-                # self.ea_layer.head=nn.Linear(base_model.lm_head.in_features,base_model.lm_head.out_features,bias=False)
-                # self.ea_layer.head.weight=copy.deepcopy(base_model.lm_head.weight)
-                # self.ea_layer.head.to(device)
-                self.ea_layer.headweight = base_model.lm_head.weight.clone().to(device)
-            else:
-                self.ea_layer.layer_device = device
+            # if not low_memory:
+            #     # self.ea_layer.head=nn.Linear(base_model.lm_head.in_features,base_model.lm_head.out_features,bias=False)
+            #     # self.ea_layer.head.weight=copy.deepcopy(base_model.lm_head.weight)
+            #     # self.ea_layer.head.to(device)
+            #     self.ea_layer.headweight = base_model.lm_head.weight.clone().to(device)
+            # else:
+            #     self.ea_layer.layer_device = device
 
         else:
             self.ea_layer.diff_device = False
@@ -136,7 +136,11 @@ class EaModel(nn.Module):
             input_ids = torch.cat((input_ids, token.to(input_ids.device)), dim=1)
             # Clone the output hidden states
 
-            ea_logits = self.ea_layer.topK_generate(hidden_states, input_ids, self.base_model.lm_head, logits_processor)
+            if getattr(self.ea_layer,'lm_head'):
+                ea_logits = self.ea_layer.topK_generate(hidden_states, input_ids, self.ea_layer.lm_head,
+                                                        logits_processor)
+            else:
+                ea_logits = self.ea_layer.topK_generate(hidden_states, input_ids, self.base_model.lm_head, logits_processor)
             if output_orig:
                 return ea_logits, outputs, orig, hidden_states, token
             return ea_logits, hidden_states, token

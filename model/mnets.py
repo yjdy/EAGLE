@@ -18,7 +18,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 import json
-""" PyTorch LLaMA model."""
 import copy
 import os
 
@@ -33,15 +32,44 @@ try:
     from .configs import EConfig
     from .utils_c import *
     from .choices import *
-    from .rotary_embedding_torch import RotaryEmbedding
 except:
     from configs import EConfig
     from utils_c import *
     from choices import *
     from utils import prepare_logits_processor
-    from rotary_embedding_torch import RotaryEmbedding
-from copy import deepcopy
+
 top_k=10
+
+class ResBlock(nn.Module):
+    """
+    A Residual Block module.
+
+    This module performs a linear transformation followed by a SiLU activation,
+    and then adds the result to the original input, creating a residual connection.
+
+    Args:
+        hidden_size (int): The size of the hidden layers in the block.
+    """
+
+    def __init__(self, hidden_size):
+        super().__init__()
+        self.linear = nn.Linear(hidden_size, hidden_size)
+        # Initialize as an identity mapping
+        torch.nn.init.zeros_(self.linear.weight)
+        # Use SiLU activation to keep consistent with the Llama model
+        self.act = nn.SiLU()
+
+    def forward(self, x):
+        """
+        Forward pass of the ResBlock.
+
+        Args:
+            x (torch.Tensor): Input tensor.
+
+        Returns:
+            torch.Tensor: Output after the residual connection and activation.
+        """
+        return x + self.act(self.linear(x))
 
 # Copied from transformers.models.bart.modeling_bart._make_causal_mask
 def _make_causal_mask(
@@ -86,31 +114,14 @@ def repeat_kv(hidden_states: torch.Tensor, n_rep: int) -> torch.Tensor:
     hidden_states = hidden_states[:, :, None, :, :].expand(batch, num_key_value_heads, n_rep, slen, head_dim)
     return hidden_states.reshape(batch, num_key_value_heads * n_rep, slen, head_dim)
 
-def rotate_half(x):
-    """Rotates half the hidden dims of the input."""
-    x1 = x[..., : x.shape[-1] // 2]
-    x2 = x[..., x.shape[-1] // 2 :]
-    return torch.cat((-x2, x1), dim=-1)
-def apply_rotary_pos_emb(q, k, cos, sin, position_ids):
-    # The first two dimensions of cos and sin are always 1, so we can `squeeze` them.
-    cos = cos.squeeze(1).squeeze(0)  # [seq_len, dim]
-    sin = sin.squeeze(1).squeeze(0)  # [seq_len, dim]
-    cos = cos[position_ids].unsqueeze(1)  # [bs, 1, seq_len, dim]
-    sin = sin[position_ids].unsqueeze(1)  # [bs, 1, seq_len, dim]
-    q_embed = (q * cos) + (rotate_half(q) * sin)
-    k_embed = (k * cos) + (rotate_half(k) * sin)
-    return q_embed, k_embed
 
 
 def len_list(x,n):
     return [i for i in x if len(i)<=n]
 
 class Model(nn.Module):
-    def __init__(self,config,load_emb=True,path=None,bias=True):
+    def __init__(self,config,load_emb=True,path=None,num_res_layer=0,lm_head=False):
         super().__init__()
-
-
-
 
         self.gradient_checkpointing = True
         self.padding_idx = config.pad_token_id
@@ -153,6 +164,12 @@ class Model(nn.Module):
         # self.layers = DIN(seq{0, t-1}, t) # ETA, SDIM [B, Seq_len, emb] [B, Seq_len, emb]
         # query_states, key_states = apply_rotary_pos_emb(query_states, key_states, cos, sin, position_ids)
         # self.fc=nn.Linear(2*config.hidden_size,config.hidden_size,bias=bias)
+        if num_res_layer>0:
+            self.fc_out = nn.Sequential(
+                *([ResBlock(config.hidden_size)] * num_res_layer)
+            )
+        if lm_head:
+            self.lm_head = torch.nn.Linear(config.hidden_size, config.vocab_size, bias=False)
 
 
         self.head = torch.nn.Linear(config.hidden_size, config.vocab_size, bias=False)
@@ -288,6 +305,8 @@ class Model(nn.Module):
 
             hidden_states = layer_outputs
             # hidden_states = layer_outputs[0]
+            if getattr(self,"fc_out"):
+                hidden_states = self.fc_out(hidden_states)
 
             if use_cache:
                 next_decoder_cache += (layer_outputs[1],)
@@ -396,6 +415,8 @@ class Model(nn.Module):
                 layer_outputs = decoder_layer.step(hidden_states.unsqueeze(1),caches[idx][0], caches[idx][1])
 
             hidden_states = layer_outputs[0]
+            if getattr(self,"fc_out"):
+                hidden_states = self.fc_out(hidden_states)
 
             if use_cache:
                 next_decoder_cache[0].append(layer_outputs[1])
@@ -562,14 +583,7 @@ class Model(nn.Module):
 
         # last_hidden = out_hidden[:, -1]
         last_hidden = out_hidden.squeeze(1)
-        if not self.diff_device:
-            last_headout = head(last_hidden)
-        else:
-            if hasattr(self, "layer_device"):
-                last_headout = head(last_hidden)
-                last_headout=last_headout.to(self.layer_device)
-            else:
-                last_headout=F.linear(last_hidden,self.headweight)
+        last_headout = head(last_hidden)
 
 
         for i in range(len(self.tree_buffer['tree_indices'])):

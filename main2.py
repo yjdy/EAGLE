@@ -1,3 +1,5 @@
+# 用来训练自带lm_head的情况
+
 import argparse
 import math
 import gc
@@ -5,9 +7,9 @@ import gc
 parser = argparse.ArgumentParser(description='sp')
 parser.add_argument('--basepath', type=str, default='/home/lyh/weights/hf/vicuna_v13/7B/')
 parser.add_argument('--configpath', type=str, default="config.json")
-parser.add_argument('--lr', type=float, default=3e-4)
-parser.add_argument('--bs', type=int, default=32)
-parser.add_argument('--gradient-accumulation-steps', type=int, default=1)
+parser.add_argument('--lr', type=float, default=1e-3)
+parser.add_argument('--bs', type=int, default=64)
+parser.add_argument('--gradient-accumulation-steps', type=int, default=4)
 parser.add_argument('--tmpdir', type=str, default='0')
 parser.add_argument('--outdir', type=str, default='0')
 parser.add_argument('--cpdir', type=str, default='0')
@@ -18,16 +20,16 @@ args = parser.parse_args()
 train_config = {
     "lr": args.lr,
     "bs": args.bs,
-    'weight_decay':0.01,
+    'weight_decay': 0.01,
     "gradient_accumulation_steps": args.gradient_accumulation_steps,
     "datapath": f"{args.tmpdir}",
     "is_warmup": True,
-    "num_epochs": 20,
+    "num_epochs": 2,
     # Depending on your data and model size, the larger the model, the higher the sample efficiency. We recommend setting it between 20-40.
     "num_warmup_steps": 200,
     "total_steps": 800000,
     "p_w": 1.0,
-    "v_w": 1.0,
+    "v_w": 0.1,
     "head_w": 0.1,
     "num_workers": 4,
     "embeding": True,
@@ -52,7 +54,7 @@ import torch
 torch.backends.cuda.matmul.allow_tf32 = True
 from accelerate import Accelerator
 from accelerate.utils import set_seed
-from accelerate.utils import DistributedDataParallelKwargs,DummyScheduler
+from accelerate.utils import DistributedDataParallelKwargs, DummyScheduler
 
 set_seed(0)
 ddp_kwargs = DistributedDataParallelKwargs(find_unused_parameters=True)
@@ -72,9 +74,8 @@ from tqdm import tqdm
 from transformers import get_linear_schedule_with_warmup, AutoConfig
 from model.utils import create_adamw_optimizer
 
-
-
 baseconfig = AutoConfig.from_pretrained(args.basepath)
+
 
 def list_files(path):
     datapath = []
@@ -263,7 +264,7 @@ def getkacc(model, data, head, max_length=5):
                 single_input_ids = torch.cat((single_input_ids, torch.tensor([[token]]).to(single_input_ids.device)),
                                              dim=1)
 
-    acc = [correct[i] / (total[i]+1e-8) for i in range(len(correct))]
+    acc = [correct[i] / (total[i] + 1e-8) for i in range(len(correct))]
     return acc
 
 
@@ -285,13 +286,12 @@ with accelerator.main_process_first():
     # exit()
     traindataset = CustomDataset(traindatapath, transform=aug)
     testdataset = CustomDataset(testdatapath)
-    train_loader = DataLoader(traindataset, batch_size=train_config["bs"], shuffle=True,drop_last=True,
+    train_loader = DataLoader(traindataset, batch_size=train_config["bs"], shuffle=True, drop_last=True,
                               collate_fn=DataCollatorWithPadding(), num_workers=train_config["num_workers"],
                               pin_memory=True)
     test_loader = DataLoader(testdataset, batch_size=train_config["bs"], shuffle=False,
-                             collate_fn=DataCollatorWithPadding(), num_workers=train_config["num_workers"], pin_memory=False)
-
-
+                             collate_fn=DataCollatorWithPadding(), num_workers=train_config["num_workers"],
+                             pin_memory=False)
 
 if accelerator.is_main_process:
     if not os.path.exists(args.cpdir):
@@ -300,33 +300,35 @@ if accelerator.is_main_process:
 config = EConfig.from_pretrained(train_config["config_path"])
 
 num_epochs = train_config["num_epochs"]
-total_steps = len(train_loader)*num_epochs
+total_steps = len(train_loader) * num_epochs
 is_warmup = train_config["is_warmup"]
 if train_config["num_warmup_steps"] < 1:
-    num_warmup_steps = train_config["num_warmup_steps"]*total_steps
+    num_warmup_steps = train_config["num_warmup_steps"] * total_steps
 else:
     num_warmup_steps = train_config["num_warmup_steps"]
 
-model = Model(config, load_emb=True, path=args.basepath,num_res_layer=1)
+model = Model(config, load_emb=False, path=args.basepath,num_res_layer=1,lm_head=True)
 
-criterion = nn.SmoothL1Loss(reduction="none")
+criterion = nn.KLDivLoss(reduction='none')
+softmax = nn.Softmax(dim=2)
+logsofmax = nn.LogSoftmax(dim=2)
 # Optimizer adn Scheduler
 if (
         accelerator.state.deepspeed_plugin is None
-            or "optimizer" not in accelerator.state.deepspeed_plugin.deepspeed_config
-    ):
-        optimizer = create_adamw_optimizer(model, lr=train_config['lr'],
-                                           weight_decay=train_config['weight_decay'],betas=(train_config["b1"],train_config["b2"]))
+        or "optimizer" not in accelerator.state.deepspeed_plugin.deepspeed_config
+):
+    optimizer = create_adamw_optimizer(model, lr=train_config['lr'],
+                                       weight_decay=train_config['weight_decay'],
+                                       betas=(train_config["b1"], train_config["b2"]))
 else:
-    optimizer = create_adamw_optimizer(model, lr=train_config['lr'], weight_decay=train_config['weight_decay'],dummy=True)
-
-
+    optimizer = create_adamw_optimizer(model, lr=train_config['lr'], weight_decay=train_config['weight_decay'],
+                                       dummy=True)
 
 if is_warmup and accelerator.state.deepspeed_plugin is None or "scheduler" not in accelerator.state.deepspeed_plugin.deepspeed_config:
     scheduler = get_linear_schedule_with_warmup(optimizer, num_warmup_steps=num_warmup_steps,
                                                 num_training_steps=total_steps)
 elif is_warmup:
-    scheduler = DummyScheduler(optimizer, warmup_num_steps=int(num_warmup_steps),total_num_steps=total_steps)
+    scheduler = DummyScheduler(optimizer, warmup_num_steps=int(num_warmup_steps), total_num_steps=total_steps)
 
 if is_warmup:
     model, optimizer, train_loader, test_loader, scheduler = accelerator.prepare(
@@ -340,7 +342,7 @@ if args.existstate:
     accelerator.load_state(args.existstate)
     if accelerator.is_main_process:
         unwrap_model = accelerator.unwrap_model(model)
-        torch.save({"model_state":unwrap_model.state_dict()}, f"{args.existstate}/ckpt.pt")
+        torch.save({"model_state": unwrap_model.state_dict()}, f"{args.existstate}/ckpt.pt")
 
 for epoch in range(num_epochs + 1):
     torch.cuda.empty_cache()
@@ -354,7 +356,7 @@ for epoch in range(num_epochs + 1):
 
         with accelerator.accumulate(model):
             optimizer.zero_grad(set_to_none=True)
-            if accelerator.mixed_precision=='fp16':
+            if accelerator.mixed_precision == 'fp16':
                 inputs = data["hidden_states"].to(torch.float16)
                 targets = data["target"].to(torch.float16)
             else:
@@ -363,14 +365,14 @@ for epoch in range(num_epochs + 1):
             predict = model(inputs, input_ids=data["input_ids"], attention_mask=data["attention_mask"])
             with torch.no_grad():
                 target_head = model.head(targets)
-                target_p = nn.Softmax(dim=2)(target_head)
+                target_p = softmax(target_head)
                 target_p = target_p.detach()
             out_head = model.head(predict)
-            out_logp = nn.LogSoftmax(dim=2)(out_head)
+            out_logp = logsofmax(out_head)
             loss_mask = data["loss_mask"][:, :, None]
             plogp = target_p * out_logp
             ploss = -torch.sum(torch.sum(loss_mask * plogp, 2)) / loss_mask.sum()
-            vloss = criterion(predict, data["target"])
+            vloss = criterion(out_head, target_p)
             vloss = torch.sum(torch.mean(loss_mask * vloss, 2)) / loss_mask.sum()
             loss = train_config["v_w"] * vloss + train_config["p_w"] * ploss
             accelerator.backward(loss)
@@ -379,8 +381,6 @@ for epoch in range(num_epochs + 1):
             optimizer.step()
             if is_warmup and not accelerator.optimizer_step_was_skipped:
                 scheduler.step()
-
-        
 
         with torch.no_grad():
             _, predicted = torch.max(out_head, 2)
@@ -402,7 +402,7 @@ for epoch in range(num_epochs + 1):
     accelerator.print('Epoch [{}/{}], Loss: {:.4f}'.format(epoch + 1, num_epochs, epoch_loss))
     accelerator.print('Train Accuracy: {:.2f}%'.format(100 * correct / total))
 
-    if (epoch + 1) % train_config["save_freq"]==0:
+    if (epoch + 1) % train_config["save_freq"] == 0:
         torch.cuda.empty_cache()
         gc.collect()
         correct = 0
@@ -423,14 +423,14 @@ for epoch in range(num_epochs + 1):
                 predict = model(inputs, input_ids=data["input_ids"],
                                 attention_mask=data["attention_mask"])
                 target_head = model.head(targets)
-                target_p = nn.Softmax(dim=2)(target_head)
+                target_p = softmax(target_head)
                 target_p = target_p.detach()
                 out_head = model.head(predict)
-                out_logp = nn.LogSoftmax(dim=2)(out_head)
+                out_logp = logsofmax(out_head)
                 loss_mask = data["loss_mask"][:, :, None]
                 plogp = target_p * out_logp
                 ploss = -torch.sum(torch.sum(loss_mask * plogp, 2)) / loss_mask.sum()
-                vloss = criterion(predict, data["target"])
+                vloss = criterion(out_head, target_p)
                 vloss = torch.sum(torch.mean(loss_mask * vloss, 2)) / loss_mask.sum()
                 loss = train_config["v_w"] * vloss + train_config["p_w"] * ploss
                 _, predicted = torch.max(out_head, 2)
